@@ -3,7 +3,7 @@ Exercise for Sylwia, chance-profit.
 """
 
 from __future__ import annotations
-from typing import NoReturn, final, Final
+from typing import NoReturn, final, Final, Self
 
 import numpy as np
 
@@ -14,6 +14,333 @@ import multiprocessing
 import multiprocessing.sharedctypes
 import plotly
 import os
+import numbers
+import enum
+import time
+import warnings
+import tqdm
+import types
+
+
+class ProgressBar:
+
+    """
+    Progress bar class showing the progress bar in the console.
+    """
+
+    def __init__(self, total: int | float = 100, description: str | None = None) -> None:
+
+        """
+        Constructor for the ProgressBar class.
+
+        Args:
+            total (int | float): The total value to be achieved by the progress bar. 100 by default.
+            description (str): Description to the progress bar shown on the left. None by default.
+
+        Raises:
+            AssertionError: If the type of any argument does not match the correct one.
+        """
+
+        assert isinstance(description, str) or description is None, f"description type should match either " \
+                                                                    f"{str.__name__} or {types.NoneType.__name__}. " \
+                                                                    f"{type(description).__name__} given instead."
+
+        assert isinstance(total, (int, float)), f"total type should match either {int.__name__} or {float.__name__}. " \
+                                                f"{type(total).__name__} given instead."
+
+        self.__progress_bar: tqdm.tqdm = tqdm.tqdm(total=total, desc=description)
+
+    @property
+    def progress_bar(self) -> tqdm.tqdm:
+
+        """
+        Getter for the self.__progress_bar attribute.
+
+        Returns:
+            tqdm.tqdm: The value of the self.__progress_bar attribute.
+        """
+
+        return self.__progress_bar
+
+    def increase(self, value: int | float = 1) -> None:
+
+        """
+        Method used for increasing the value of the progress bar.
+
+        Args:
+            value (int | float): The value to be added to the current progress value. 1 by default.
+
+        Raises:
+            AssertionError: If the value argument is not int or float.
+        """
+
+        assert isinstance(value, (int, float)), f"value type should match either {int.__name__} or {float.__name__}. " \
+                                                f"{type(value).__name__} given instead."
+
+        self.progress_bar.update(value)
+
+    def __add__(self, other: int | float) -> Self:
+
+        """
+        Overriden special method that makes possible increasing the progress bar value using the "+" operator.
+
+        Args:
+            other (int | float): A value to be added to current progress on the progress bar. Must be positive.
+
+        Examples:
+            "bar + 5" = "bar.increase(5)"
+        """
+
+        self.increase(value=other)
+
+        return self
+
+    def __del__(self) -> None:
+
+        """
+        Overriden __del__ special method used for object deletion. Automatically called by the garbage collector.
+        In here closes the progress bar by calling the self.progress_bar.close() method.
+        """
+
+        self.progress_bar.close()
+
+
+class OrdinalNumbers(enum.Enum):
+
+    """
+    Class for ordinal numbers.
+    """
+
+    ST: Final[int] = 1
+    ND: Final[int] = 2
+    RD: Final[int] = 3
+    TH: Final[set[int]] = {0, 4, 5, 6, 7, 8, 9}
+
+    def __str__(self) -> str:
+
+        """
+        Overriden special method to provide lower-case members' names.
+
+        Returns:
+            str: The lower-case member name.
+
+        Examples:
+            # Proper use:
+            >>> print(OrdinalNumbers(7))
+            th
+
+            # The following syntax returns upper-case member name:
+            >>> print(OrdinalNumbers(7).name)
+            TH
+        """
+
+        return self.name.lower()
+
+    @classmethod
+    def _missing_(cls, key: int) -> Self:
+
+        """
+        Overriden special class method to find the unspecified key.
+
+        Args:
+            key (int): The key of the enum.Enum class element.
+
+        Returns:
+            Self: The OrdinalNumbers class object.
+        """
+
+        assert isinstance(key, int), f"key should be of type {int.__name__}. {type(key).__name__} given instead."
+
+        for member in cls.__members__.values():
+            match isinstance(member.value, (set, tuple)):
+                case True:
+                    if key in member.value:
+                        return member
+                    else:
+                        continue
+                case False:
+                    if key == member.value:
+                        return member
+                    else:
+                        continue
+        else:
+            raise ValueError(f"Such element does not exist in the {cls.__name__} class.")
+
+
+class NumericalTools:
+
+    """
+    Class implementing methods for numerical functions and tools.
+    """
+
+    numeric_types: set[type] = {numbers.Number, np.number}
+
+    @classmethod
+    def is_numeric(cls, obj: object) -> bool:
+
+        """
+        Class Method for determining if the given object is of the numerical type (numbers.Number, np.number).
+
+        Args:
+            obj (object): Object that is going to be checked for its numerical properties.
+
+        Returns:
+            bool: True - if the given object is either int, np.int16, float, np.float64, (...).
+        """
+
+        return isinstance(obj, tuple(cls.numeric_types))
+
+    @staticmethod
+    def rescale_values(values: list[int | float] | tuple[int | float], lower_bound: float,
+                       higher_bound: float) -> list[int | float]:
+        """
+        Static method prescaling the iterable of values to the given range.
+
+        Args:
+            values (list[int | float] | tuple[int | float]): The iterable of values to be rescaled.
+            lower_bound (int | float): The minimum value of the rescaled sequence.
+            higher_bound (int | float): The maximum value of the rescaled sequence.
+
+        Returns:
+            list[int | float]: The list of rescaled values from the input iterable.
+        """
+
+        min_val: float = min(values)
+        amplitudes_ratio: float = (higher_bound - lower_bound) / (max(values) - min_val)
+
+        return [(value - min_val) * amplitudes_ratio + lower_bound for value in values]
+
+    @classmethod
+    def seq_n_diff(cls, sequence: list[int | float] | tuple[int | float], n: int = 1) -> tuple[int | float]:
+
+        """
+        Class method for calculation of the sequence n-difference.
+
+        Args:
+            sequence (list[int | float] | tuple[int | float]): The sequence for for calculation.
+            n (int): The order of the difference. 1 by default.
+
+        Returns:
+            tuple[int | float]: The tuple of the n-difference sequence.
+
+        Raises:
+            AssertionError: If any of the following occurs:
+                - sequence is not a list nor a tuple,
+                - sequence length is not higher than 1,
+                - at least one element in the sequence is not int nor a float,
+                - order of the sequence "n" is not an int,
+                - order of the sequence "n" is higher or equal to the number of elements in the sequence,
+                - order of the sequence "n" is lower or equal to 0.
+        """
+
+        assert isinstance(sequence, (list, tuple)), f"sequence should be of type {list.__name__} or {tuple.__name__}." \
+                                                    f" {type(sequence).__name__} given instead."
+
+        assert len(sequence) > 1, f"Number of elements in the sequence should be greater or equal to 2. " \
+                                  f"Current cardinality: {len(sequence)}."
+
+        assert all(
+            cls.is_numeric(element) for element in sequence
+        ), f"Each element in the sequence should be of type either {numbers.Number.__name__} or {np.number.__name__}." \
+           f" At least one element is of type " \
+           f"{type(list(filter(lambda element: type(element) not in cls.numeric_types, sequence))[0]).__name__}."
+
+        assert isinstance(n, int), f"n should be of type {int.__name__}. {type(n).__name__} given instead."
+
+        assert n < len(sequence), f"n should be lower than number of elements in the sequence. n: {n}, number of " \
+                                  f"elements in the sequence: {len(sequence)}."
+
+        assert n > 0, f"n should be higher than 0. {n} given instead."
+
+        difference_sequence: list[int | float] = [
+            element - prev_element for prev_element, element in zip(sequence, sequence[1:])
+        ]
+
+        for _ in range(n - 1):
+            difference_sequence: list[int | float] = [
+                element - prev_element for prev_element, element in zip(difference_sequence, difference_sequence[1:])
+            ]
+
+        return tuple(difference_sequence)
+
+    @staticmethod
+    def scientific_notation(number: int | float) -> str:
+
+        """
+        Method for conversion of a number to a string with its scientific notation.
+
+        Args:
+            number (int | float): The number to be converted.
+
+        Returns:
+            str: The number represented in the scientific notation.
+
+        Raises:
+            AssertionError: If the number type is not int nor float.
+        """
+
+        assert isinstance(number, (int, float)), f"number should be of type {int.__name__} or {float.__name__}. " \
+                                                 f"{type(number).__name__} given instead."
+
+        power: int = 0
+        while True:
+            try:
+                number: float = float(number / 10 ** power)
+            except OverflowError:
+                power += 1
+                continue
+
+            number: str = str(number)
+            e_plus_pos: int = number.find('e+')
+            if e_plus_pos == -1:
+                return number
+            else:
+                return number[:e_plus_pos] + 'e+' + str(int(number[e_plus_pos + 1:]) + power)
+
+    @staticmethod
+    def integer_multiply(first_element: int | float, float_element: float) -> int | float:
+
+        """
+        Method multiplying two numbers together. Useful for calculating of big numbers that need to be expressed as
+        integers due to floating-point numbers 64-bit limits, where 11 bits are used for exponent storing.
+
+        Args:
+            first_element (int | float): The integer or float number to multiply with the floating-point number.
+            float_element (float): The floating-point number to multiply with the integer number.
+
+        Returns:
+            int: The integer being a result of the multiplication with the limited precision (the decimal points are cut
+            off).
+
+        Raises:
+            AssertionError: If the first_element is not of type int nor float or float_element is not of type float.
+        """
+
+        assert isinstance(first_element, (int, float)), f"first_element should be of type {int.__name__} or " \
+                                                        f"{float.__name__}. {type(first_element).__name__} " \
+                                                        f"given instead."
+
+        assert isinstance(float_element, float), f"float_element should be of type {float.__name__}. " \
+                                                 f"{type(float_element).__name__} given instead."
+
+        try:
+            default_multiply: float = first_element * float_element
+            if default_multiply == np.inf:
+                pass
+            else:
+                return default_multiply
+        except OverflowError:
+            pass
+
+        float_element: str = str(float_element)
+        dot_position: int = float_element.find('.')
+
+        fractional_part_str: str = float_element[dot_position + 1:]
+        return (
+            int(first_element) * int(float_element[:dot_position])
+        ) + (
+            int(first_element) * int(fractional_part_str) // 10 ** len(fractional_part_str)
+        )
 
 
 class ValuesPlotter:
@@ -233,42 +560,84 @@ class ChanceProfit:
     """
 
     @staticmethod
-    @numba.njit()
-    def __test(prev_max: float) -> tuple[int, list[float]]:
+    @numba.jit(forceobj=True)
+    def __test(prev_max: float, invest_part: float) -> tuple[int, list[int | float]]:
 
         """
         Class method for testing the strategy.
 
         Args:
             prev_max (float): Previously calculated max_value.
+            invest_part (float): Part of the whole wallet to invest.
 
         Returns:
             tuple[int, list[float]]: The number of trials and the list of the wallet balance if function of time.
+
+        Notes:
+            Method is compiled with Numba in order to provide higher performance.
+        """
+
+        assert isinstance(prev_max, float), f"prev_max should be of type {float.__name__}. " \
+                                            f"{type(prev_max).__name__} given instead."
+
+        assert isinstance(invest_part, float), f"invest_part should be of type {float.__name__}. " \
+                                               f"{type(invest_part).__name__} given instead."
+
+        """
+        Integer_multiply:
+        try:
+            default_multiply: float = first_element * float_element
+            if default_multiply == np.inf:
+                pass
+            else:
+                return default_multiply
+        except OverflowError:
+            pass
+
+        float_element: str = str(float_element)
+        dot_position: int = float_element.find('.')
+
+        fractional_part_str: str = float_element[dot_position + 1:]
+        return (
+            int(first_element) * int(float_element[:dot_position])
+        ) + (
+            int(first_element) * int(fractional_part_str) // 10 ** len(fractional_part_str)
+        )
         """
 
         success_chance: Final[float] = 0.5
         profit_after_success: Final[float] = 2
-        invest_part: Final[float] = 0.5
-        kill_border: Final[float] = 0.5
+        kill_border: Final[float] = 1 - invest_part
 
         trials_counter: int = 0
-        wallet_balances: list[float] = [0.0]
+        wallet_balances: list[int | float] = [0.0]
+
         while max(wallet_balances) <= prev_max:
 
-            wallet_balances: list[float] = [1.0]
+            wallet_balances: list[int | float] = [1.0]
             trials_counter += 1
-            while wallet_balances[-1] > kill_border:
+            while wallet_balances[-1] > kill_border and len(wallet_balances) <= 10 ** 6:
 
                 if np.random.random() <= success_chance:
-                    wallet_balances.append(wallet_balances[-1] * (1 + invest_part * profit_after_success))
+                    wallet_balances.append(
+                        NumericalTools.integer_multiply(
+                            wallet_balances[-1],
+                            1 + invest_part * profit_after_success
+                        )
+                    )
                 else:
-                    wallet_balances.append(wallet_balances[-1] * (1 - invest_part))
+                    wallet_balances.append(
+                        NumericalTools.integer_multiply(
+                            wallet_balances[-1],
+                            1 - invest_part
+                        )
+                    )
 
         return trials_counter, wallet_balances
 
     def _constant_run(self, max_value: multiprocessing.sharedctypes.Synchronized[float],
                       trials_counter: multiprocessing.sharedctypes.Synchronized[int],
-                      lock: multiprocessing.Lock) -> NoReturn:
+                      lock: multiprocessing.Lock, invest_part: float, max_value_limit: float) -> None | NoReturn:
 
         """
         Method for the constant run of the ChanceProfit.test() method.
@@ -279,18 +648,34 @@ class ChanceProfit:
             trials_counter (multiprocessing.sharedctypes.Synchronized[int]): Shared between processes variable that
             stores the information about the total number of taken trials.
             lock (multiprocessing.Lock): Lock not to lead to race conditions.
+            invest_part (float): The constant describing what part of the wallet is supposed to be used in the
+            simulation.
+            max_value_limit (float): The upper limit of the max_value to be reached until the method returns. If 'inf'
+            then the _constant_run is going to run indefinitely.
         """
 
-        create_plot_and_show_value: bool = False
+        # Ignore the warning "RuntimeWarning: overflow encountered in scalar multiply
+        #   default_multiply: float = first_element * float_element" so the output is clear of it.
+        warnings.filterwarnings("ignore", category=RuntimeWarning, message="overflow encountered in scalar multiply")
+
+        # Apply the same as above to the following warning "RuntimeWarning: overflow encountered in multiply
+        #   default_multiply: float = first_element * float_element".
+        warnings.filterwarnings("ignore", category=RuntimeWarning, message="overflow encountered in multiply")
 
         trials: int = ...
-        simulation_wallet_balances: list[float] = ...
+        simulation_wallet_balances: list[int | float] = ...
+        infinite_run_condition: bool = ...
 
-        while True:
+        match max_value_limit == np.inf:
+            case True:
+                infinite_run_condition: bool = True
+            case False:
+                infinite_run_condition: bool = False
 
+        while infinite_run_condition or max_value.value <= max_value_limit:
             while True:
                 try:
-                    trials, simulation_wallet_balances = self.__test(max_value.value)
+                    trials, simulation_wallet_balances = self.__test(max_value.value, invest_part)
                 except MemoryError:
                     continue
                 else:
@@ -304,77 +689,100 @@ class ChanceProfit:
                 with lock:
                     max_value.value = max_balance
 
-                create_plot_and_show_value: bool = True
-
-            if create_plot_and_show_value:
-
-                match int((trades_to_max := str(np.argmax(simulation_wallet_balances)))[-1]):
-                    case 1:
-                        th_trade: str = trades_to_max + 'st'
-                    case 2:
-                        th_trade: str = trades_to_max + 'nd'
-                    case 3:
-                        th_trade: str = trades_to_max + 'rd'
-                    case _:
-                        th_trade: str = trades_to_max + 'th'
-
-                match (trials_counter_value := trials_counter.value):
-                    case 1:
-                        trial_s: str = 'trial'
-                    case _:
-                        trial_s: str = 'trials'
-
-                print(f"Max balance out of 1: {max_balance} ({th_trade} trade) after "
-                      f"{trials_counter_value} {trial_s}. Max balance / trials: {max_balance / trials_counter_value}.")
-
-                ValuesPlotter(
-                    values=[
-                        simulation_wallet_balances
-                    ],
-                    title=f"{max_balance}"
-                ).create(log_scale=True)
-                create_plot_and_show_value: bool = False
-
-    def run_test(self) -> NoReturn:
+    def run_test(self) -> None:
 
         """
         Method for running the ChanceProfit.test() method concurrently.
         """
 
+        max_value_limit: Final[int] = 10 ** 100
+        max_timeout: Final[int] = 60  # 60 seconds
+
         manager: multiprocessing.Manager = multiprocessing.Manager()
-        max_value: multiprocessing.sharedctypes.Synchronized[float] = manager.Value('d', 0.0)
-        trials_counter: multiprocessing.sharedctypes.Synchronized[int] = manager.Value('i', 0)
         lock: multiprocessing.Lock = manager.Lock()
 
+        invest_part_step: float = 0.01
+        invest_part_vals: list[float] = [
+            round(
+                number,
+                len(str(invest_part_step)[str(invest_part_step).find('.'):])
+            )
+            for number in np.arange(0, 1, invest_part_step)
+        ]
+        repeat_to_minimize_errors_range: range = range(10)
+        time_invest_part_dict: dict[float, float] = {invest_part: 0 for invest_part in invest_part_vals}
+        progress_bar: ProgressBar = ProgressBar(
+            total=len(invest_part_vals) * len(repeat_to_minimize_errors_range),
+            description="Invest_part progress"
+        )
+
         with concurrent.futures.ProcessPoolExecutor() as executor:
+            for invest_part in invest_part_vals:
+                for _ in repeat_to_minimize_errors_range:
+                    max_value: multiprocessing.sharedctypes.Synchronized[float] = manager.Value('d', 0.0)
+                    trials_counter: multiprocessing.sharedctypes.Synchronized[int] = manager.Value('i', 0)
+                    start_time: float = time.perf_counter()
+                    futures: list[concurrent.futures.Future[None | NoReturn]] = [
+                        executor.submit(
+                            self._constant_run,
+                            max_value=max_value,
+                            trials_counter=trials_counter,
+                            lock=lock,
+                            invest_part=invest_part,
+                            max_value_limit=max_value_limit
+                        )
+                        for _ in range(os.cpu_count())
+                    ]
 
-            futures: list[concurrent.futures.Future[NoReturn]] = [
-                executor.submit(
-                    self._constant_run,
-                    max_value=max_value,
-                    trials_counter=trials_counter,
-                    lock=lock
-                )
-                for _ in range(os.cpu_count())
-            ]
+                    try:
 
-            for future in concurrent.futures.as_completed(futures):
-                future.result()
+                        done_and_not_done_futures = concurrent.futures.wait(
+                            fs=futures,
+                            timeout=max_timeout
+                        )
+                        for completed_future, not_completed_future in zip(
+                                done_and_not_done_futures.done,
+                                done_and_not_done_futures.not_done
+                        ):
+                            completed_future.result()
+                            not_completed_future.cancel()
+
+                    except concurrent.futures.TimeoutError:
+                        pass
+
+                    time_invest_part_dict[invest_part] += time.perf_counter() - start_time
+                    progress_bar.increase()
+
+        print(f"\nBest time "
+              f"{(t_i_p_d_val := list(time_invest_part_dict.values()))[min_time_arg := np.argmin(t_i_p_d_val)]} "
+              f"for invest_part: {list(time_invest_part_dict.keys())[min_time_arg]}.")
+
+        ValuesPlotter(
+            values=[
+                list(time_invest_part_dict.values())
+            ],
+            title='t_in_f_of_invest_part',
+            additional_lines=[60]
+        ).create(True)
 
 
 @final
 class Main:
 
     """
-    The main class for the whole program execution.
+    The main class for the whole program execution. Everything except the program entry point should be run within this
+    class.
+
+    Notes:
+        This class shouldn't be inherited.
     """
 
     @classmethod
     def main(cls) -> None:
 
         """
-        The main method for the whole program execution. Everything that is done within the program shall be run within
-        this method.
+        The main method for the whole program execution. Everything that is done in the program shall be run within
+        this method. This rule applies to all other method calls.
         """
 
         # Delete all existing .html files in the directory.
@@ -385,6 +793,12 @@ class Main:
 
 
 if __name__ == '__main__':
+
+    """
+    The entry point of the whole program.
+    If any uncaught exception is raised during runtime, then it is going to be caught and re-raised here. Such behavior
+    is recommended when it comes to exception handling of exceptions raised during execution on many threads.
+    """
 
     try:
         Main.main()
